@@ -7,20 +7,30 @@ on:
       - main
 
 permissions:
-  contents: read  # default read-only permissions for the repo
+  contents: read
 
 jobs:
   manage-codespace:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Get repository ID
+        id: repo
+        env:
+          GITHUB_TOKEN: ${{ secrets.FULL_TOKEN }}
+        run: |
+          REPO="${{ github.repository }}"
+          echo "Fetching repository ID for $REPO..."
+          REPO_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            https://api.github.com/repos/$REPO | jq -r .id)
+          echo "repo_id=$REPO_ID" >> $GITHUB_OUTPUT
+
       - name: Check if Codespace exists
         id: check
         env:
           GITHUB_TOKEN: ${{ secrets.FULL_TOKEN }}
         run: |
           REPO="${{ github.repository }}"
-          echo "Checking existing codespaces for $REPO..."
           RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             https://api.github.com/user/codespaces)
 
@@ -34,14 +44,14 @@ jobs:
         if: steps.check.outputs.found == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.FULL_TOKEN }}
+          REPO_ID: ${{ steps.repo.outputs.repo_id }}
         run: |
-          REPO="${{ github.repository }}"
-          echo "No codespace found. Creating one..."
+          echo "Creating new codespace for repo ID $REPO_ID..."
           curl -s -X POST \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/user/codespaces \
-            -d "{\"repository\":\"$REPO\",\"machine\":\"basicLinux\"}" | jq .
+            -d "{\"repository_id\": $REPO_ID, \"ref\": \"main\", \"machine\": \"basicLinux\"}" | jq .
 
       - name: Start Codespace if exists
         if: steps.check.outputs.found == 'true'
@@ -49,16 +59,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.FULL_TOKEN }}
         run: |
           REPO="${{ github.repository }}"
-          echo "Starting existing codespace..."
           CODESPACE_NAME=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             https://api.github.com/user/codespaces \
             | jq -r ".codespaces[] | select(.repository.full_name==\"$REPO\") | .name")
 
           if [ -z "$CODESPACE_NAME" ]; then
-            echo "No codespace name found for repo $REPO"
+            echo "No codespace name found for $REPO"
             exit 1
           fi
 
+          echo "Starting codespace $CODESPACE_NAME..."
           curl -s -X POST \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
