@@ -1,0 +1,63 @@
+name: Manage Codespace
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  codespaces: write   # required for start/create
+  actions: read
+
+jobs:
+  manage-codespace:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check if Codespace exists
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.FULL_TOKEN }}
+        run: |
+          REPO="${{ github.repository }}"
+          CODESPACE_NAME="${{ github.actor }}-${{ github.repository_owner }}-${{ github.event.repository.name }}"
+
+          echo "Checking codespaces for repo $REPO..."
+          RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            https://api.github.com/user/codespaces)
+          
+          if echo "$RESPONSE" | grep -q "\"repository\":.*\"$REPO\""; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Codespace if not exists
+        if: steps.check.outputs.found == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.FULL_TOKEN }}
+        run: |
+          REPO="${{ github.repository }}"
+          echo "No existing codespace found. Creating new one..."
+          curl -s -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/user/codespaces \
+            -d "{\"repository\":\"$REPO\",\"machine\":\"basicLinux\"}" | jq .
+
+      - name: Start Codespace if stopped
+        if: steps.check.outputs.found == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.FULL_TOKEN }}
+        run: |
+          REPO="${{ github.repository }}"
+          echo "Starting existing Codespace..."
+          CODESPACE_NAME=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user/codespaces \
+            | jq -r ".codespaces[] | select(.repository.full_name==\"$REPO\") | .name")
+
+          curl -s -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/user/codespaces/${CODESPACE_NAME}/start"
